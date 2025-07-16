@@ -1,11 +1,11 @@
 {
-    "name": "tubetap",
-    "short_name": "tubetap",
+    "name": "TubeTap",
+    "short_name": "TubeTap",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#ff3b3f",
+    "theme_color": "#ed1519",
+    "description": "Mobile app for downloading audio and video from YouTube.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
