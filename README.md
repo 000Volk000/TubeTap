@@ -1,4 +1,4 @@
-# SprintCode
+# TubeTap
 
 <div align="center">
     <img width="200" src="/tubetabLogo.svg" alt="TubeTap-Logo">
@@ -6,12 +6,12 @@
 
 <div align="center">
 
-Proyecto de creación de una app movil para descargar audio (.mp3) y video (.mp4) de Youtube.
+Mobile app development project for downloading audio (.mp3) and video (.mp4) from YouTube.
 
 </div>
 
 ## Acknowledgements
 
-Este proyecto ha sido creado por:
+This project has been created by:
 
 - [Darío Martínez Kostyuk](https://github.com/000Volk000)
