@@ -1,7 +1,7 @@
 # TubeTap
 
 <div align="center">
-    <img width="200" src="/tubetabLogo.svg" alt="TubeTap-Logo">
+    <img width="200" src="/assets/images/logos/tubetapLogo.svg" alt="TubeTap-Logo">
 </div>
 
 <div align="center">
