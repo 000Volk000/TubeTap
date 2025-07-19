@@ -6,8 +6,8 @@ class AppConfig {
   static const String serveVideoEndpoint = '/serve_video';
 
   // Configuración de timeouts
-  static const Duration connectionTimeout = Duration(seconds: 30);
-  static const Duration receiveTimeout = Duration(seconds: 30);
+  static const Duration connectionTimeout = Duration(seconds: 120);
+  static const Duration receiveTimeout = Duration(seconds: 120);
 
   // Configuración de calidades de video disponibles
   static const List<String> videoQualities = [

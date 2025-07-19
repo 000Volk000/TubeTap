@@ -76,18 +76,24 @@ class DownloadManager extends ChangeNotifier {
 
   List<DownloadItem> get downloads => List.unmodifiable(_downloads);
 
-  DownloadManager() {
-    _initializeProgressStream();
-  }
+  DownloadManager();
 
   // Inicializar el stream de progreso
-  void _initializeProgressStream() {
+  void _listenToProgressStream() {
+    // Asegurarse de que no haya una suscripción activa
+    _progressSubscription?.cancel();
+
     _progressSubscription = _apiService.getProgressStream().listen(
       (data) {
         _handleProgressUpdate(data);
       },
       onError: (error) {
         debugPrint('Error en stream de progreso: $error');
+        // Considerar manejar el error de forma más robusta
+      },
+      onDone: () {
+        // El stream se cerró, se puede reiniciar si es necesario
+        _progressSubscription = null;
       },
     );
   }
@@ -120,6 +126,8 @@ class DownloadManager extends ChangeNotifier {
         if (filename != null) {
           _downloadFile(currentDownload, filename);
         }
+        _progressSubscription?.cancel();
+        _progressSubscription = null;
         break;
 
       case 'error':
@@ -128,6 +136,8 @@ class DownloadManager extends ChangeNotifier {
           status: DownloadStatus.failed,
           errorMessage: errorMessage,
         );
+        _progressSubscription?.cancel();
+        _progressSubscription = null;
         break;
     }
 
@@ -182,6 +192,11 @@ class DownloadManager extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // Asegurarse de que estamos escuchando el progreso
+      if (_progressSubscription == null) {
+        _listenToProgressStream();
+      }
+
       // Iniciar descarga en el servidor
       await _apiService.startDownload(url, quality);
 
@@ -224,16 +239,17 @@ class DownloadManager extends ChangeNotifier {
     if (index == -1) return;
 
     final download = _downloads[index];
+
+    // Remover la descarga fallida antes de reintentar
+    _downloads.removeAt(index);
+    notifyListeners();
+
     await startDownload(
       url: download.url,
       format: download.format,
       quality: download.quality,
       title: download.title,
     );
-
-    // Remover la descarga fallida
-    _downloads.removeAt(index);
-    notifyListeners();
   }
 
   // Cancelar descarga
