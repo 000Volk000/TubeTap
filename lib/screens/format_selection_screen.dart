@@ -124,8 +124,8 @@ class FormatSelectionScreen extends StatelessWidget {
                   margin: const EdgeInsets.symmetric(vertical: 4),
                   child: ElevatedButton(
                     onPressed: () {
-                      Navigator.of(context).pop();
                       _startDownload(context, 'video', resolution);
+                      Navigator.of(context).popUntil((route) => route.isFirst);
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
