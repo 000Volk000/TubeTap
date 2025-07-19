@@ -30,7 +30,7 @@ class AppColors {
 
   // Método para crear MaterialColor desde coral red
   static MaterialColor get coralRedMaterialColor {
-    return MaterialColor(coralRed500.value, const <int, Color>{
+    return MaterialColor(0xFFFF3B3F, const <int, Color>{
       50: coralRed50,
       100: coralRed100,
       200: coralRed200,

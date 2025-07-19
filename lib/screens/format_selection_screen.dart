@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'downloads_screen.dart';
 import '../theme/app_colors.dart';
+import '../services/download_manager.dart';
+import '../config/app_config.dart';
 
 class FormatSelectionScreen extends StatelessWidget {
   final String url;
@@ -93,8 +96,6 @@ class FormatSelectionScreen extends StatelessWidget {
   }
 
   void _showVideoQualityDialog(BuildContext context) {
-    final resolutions = ['144', '240', '360', '480', '720', '1080'];
-
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -117,7 +118,7 @@ class FormatSelectionScreen extends StatelessWidget {
                 style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
               ),
               const SizedBox(height: 16),
-              ...resolutions.map(
+              ...AppConfig.videoQualities.map(
                 (resolution) => Container(
                   width: double.infinity,
                   margin: const EdgeInsets.symmetric(vertical: 4),
@@ -157,8 +158,6 @@ class FormatSelectionScreen extends StatelessWidget {
   }
 
   void _showAudioQualityDialog(BuildContext context) {
-    final qualities = ['128K', '192K', '256K', '320K'];
-
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -181,18 +180,14 @@ class FormatSelectionScreen extends StatelessWidget {
                 style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
               ),
               const SizedBox(height: 16),
-              ...qualities.map(
+              ...AppConfig.audioQualities.map(
                 (quality) => Container(
                   width: double.infinity,
                   margin: const EdgeInsets.symmetric(vertical: 4),
                   child: ElevatedButton(
                     onPressed: () {
                       Navigator.of(context).pop();
-                      String qualityValue = quality.substring(
-                        0,
-                        3,
-                      ); // Remove 'K'
-                      _startDownload(context, 'audio', qualityValue);
+                      _startDownload(context, 'audio', quality);
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
@@ -201,7 +196,7 @@ class FormatSelectionScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child: Text(quality),
+                    child: Text('${quality}K'),
                   ),
                 ),
               ),
@@ -224,28 +219,84 @@ class FormatSelectionScreen extends StatelessWidget {
     );
   }
 
-  void _startDownload(BuildContext context, String format, String quality) {
-    // Volver a la pantalla principal primero
-    Navigator.of(context).popUntil((route) => route.isFirst);
-
-    // Luego mostrar el SnackBar
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Iniciando descarga en formato $format ($quality${format == 'video' ? 'p' : 'K'})...',
-        ),
-        action: SnackBarAction(
-          label: 'Ver descargas',
-          onPressed: () {
-            // Navegar a la pantalla de descargas
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const DownloadsScreen()),
-            );
-          },
-        ),
-      ),
+  void _startDownload(
+    BuildContext context,
+    String format,
+    String quality,
+  ) async {
+    final downloadManager = Provider.of<DownloadManager>(
+      context,
+      listen: false,
     );
+
+    // Construir la calidad en el formato esperado por el servidor
+    String qualityFormatted;
+    if (format == 'video') {
+      qualityFormatted = '${quality}p';
+    } else {
+      qualityFormatted = '${quality}K';
+    }
+
+    try {
+      // Iniciar descarga usando el DownloadManager
+      await downloadManager.startDownload(
+        url: url,
+        format: format,
+        quality: qualityFormatted,
+        title: _extractVideoTitle(url),
+      );
+
+      // Verificar si el context sigue siendo válido antes de usarlo
+      if (!context.mounted) return;
+
+      // Volver a la pantalla principal
+      Navigator.of(context).popUntil((route) => route.isFirst);
+
+      // Mostrar mensaje de confirmación
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Descarga iniciada en formato $format ($qualityFormatted)',
+          ),
+          action: SnackBarAction(
+            label: 'Ver descargas',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const DownloadsScreen(),
+                ),
+              );
+            },
+          ),
+          duration: AppConfig.snackBarDuration,
+        ),
+      );
+    } catch (e) {
+      // Verificar si el context sigue siendo válido antes de usarlo
+      if (!context.mounted) return;
+
+      // Mostrar error si no se puede iniciar la descarga
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al iniciar descarga: $e'),
+          backgroundColor: Colors.red,
+          duration: AppConfig.errorSnackBarDuration,
+        ),
+      );
+    }
+  }
+
+  // Extraer título básico del URL
+  String _extractVideoTitle(String url) {
+    if (url.contains('youtube.com') || url.contains('youtu.be')) {
+      final uri = Uri.parse(url);
+      final videoId =
+          uri.queryParameters['v'] ??
+          (url.contains('youtu.be') ? uri.pathSegments.last : null);
+      return videoId != null ? 'Video $videoId' : 'Video de YouTube';
+    }
+    return 'Video descargado';
   }
 }
 

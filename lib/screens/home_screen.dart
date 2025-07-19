@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'url_input_screen.dart';
 import 'downloads_screen.dart';
+import '../services/download_manager.dart';
+import '../widgets/connection_indicator.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -8,7 +11,15 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('TubeTap')),
+      appBar: AppBar(
+        title: const Text('TubeTap'),
+        actions: const [
+          Padding(
+            padding: EdgeInsets.only(right: 16.0),
+            child: ConnectionIndicator(),
+          ),
+        ],
+      ),
       body: Stack(
         children: [
           Padding(
@@ -24,7 +35,7 @@ class HomeScreen extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         // Logo desde assets (ajustado para formato horizontal)
-                        Container(
+                        SizedBox(
                           width: 140,
                           height: 140,
                           child: ClipRRect(
@@ -92,49 +103,86 @@ class HomeScreen extends StatelessWidget {
             ),
           ),
 
-          // Botón de descargas visible en la esquina inferior derecha
+          // Botón de descargas con badge para mostrar descargas activas
           Positioned(
             bottom: 24,
             right: 24,
-            child: InkWell(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const DownloadsScreen(),
-                  ),
-                );
-              },
-              borderRadius: BorderRadius.circular(30),
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Color(0xFFFF3B3F), // Color coral red directo
-                  borderRadius: BorderRadius.circular(30),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black26,
-                      blurRadius: 8,
-                      offset: Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+            child: Consumer<DownloadManager>(
+              builder: (context, downloadManager, child) {
+                final activeDownloads = downloadManager.downloads
+                    .where((d) => d.status == DownloadStatus.downloading)
+                    .length;
+
+                return Stack(
                   children: [
-                    Icon(Icons.download, color: Colors.white, size: 20),
-                    SizedBox(width: 8),
-                    Text(
-                      'Descargas',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
+                    InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const DownloadsScreen(),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(30),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Color(0xFFFF3B3F), // Color coral red directo
+                          borderRadius: BorderRadius.circular(30),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 8,
+                              offset: Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.download, color: Colors.white, size: 20),
+                            SizedBox(width: 8),
+                            Text(
+                              'Descargas',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
+
+                    // Badge para descargas activas
+                    if (activeDownloads > 0)
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: const BoxDecoration(
+                            color: Colors.orange,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            '$activeDownloads',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
-                ),
-              ),
+                );
+              },
             ),
           ),
         ],
@@ -150,7 +198,7 @@ class HomeScreen extends StatelessWidget {
         height: 140,
         fit: BoxFit.contain, // Cambiado a contain para mostrar toda la imagen
         errorBuilder: (context, error, stackTrace) {
-          print('🔴 Error loading PNG: $error');
+          debugPrint('🔴 Error loading PNG: $error');
           // Fallback a un logo creado con widgets
           return Container(
             width: 140,
@@ -181,7 +229,7 @@ class HomeScreen extends StatelessWidget {
         },
       );
     } catch (e) {
-      print('🔴 Exception loading logo: $e');
+      debugPrint('🔴 Exception loading logo: $e');
       return Container(
         width: 140,
         height: 140,

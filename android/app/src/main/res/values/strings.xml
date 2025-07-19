@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TubeTap</string>
+    <string name="channel_name">TubeTap Downloads</string>
+    <string name="channel_description">Notifications for TubeTap downloads</string>
+</resources>

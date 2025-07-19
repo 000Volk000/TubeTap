@@ -1,40 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/download_manager.dart';
+import 'dart:io';
 
-class DownloadsScreen extends StatefulWidget {
+class DownloadsScreen extends StatelessWidget {
   const DownloadsScreen({super.key});
-
-  @override
-  State<DownloadsScreen> createState() => _DownloadsScreenState();
-}
-
-class _DownloadsScreenState extends State<DownloadsScreen> {
-  // Lista simulada de descargas
-  final List<DownloadItem> _downloads = [
-    DownloadItem(
-      title: 'Video de ejemplo 1',
-      url: 'https://youtube.com/watch?v=example1',
-      format: 'MP4',
-      status: DownloadStatus.completed,
-      progress: 100,
-      size: '25.6 MB',
-    ),
-    DownloadItem(
-      title: 'Audio de ejemplo 2',
-      url: 'https://youtube.com/watch?v=example2',
-      format: 'MP3',
-      status: DownloadStatus.downloading,
-      progress: 65,
-      size: '4.2 MB',
-    ),
-    DownloadItem(
-      title: 'Video de ejemplo 3',
-      url: 'https://youtube.com/watch?v=example3',
-      format: 'MP4',
-      status: DownloadStatus.failed,
-      progress: 0,
-      size: '0 MB',
-    ),
-  ];
 
   @override
   Widget build(BuildContext context) {
@@ -42,30 +12,50 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       appBar: AppBar(
         title: const Text('Descargas'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.delete_sweep),
-            onPressed: _clearCompleted,
-            tooltip: 'Limpiar completadas',
+          Consumer<DownloadManager>(
+            builder: (context, downloadManager, child) {
+              final hasCompleted = downloadManager.downloads.any(
+                (d) => d.status == DownloadStatus.completed,
+              );
+
+              return IconButton(
+                icon: const Icon(Icons.delete_sweep),
+                onPressed: hasCompleted
+                    ? () => downloadManager.clearCompleted()
+                    : null,
+                tooltip: 'Limpiar completadas',
+              );
+            },
           ),
         ],
       ),
-      body: _downloads.isEmpty
-          ? _buildEmptyState()
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _downloads.length,
-              itemBuilder: (context, index) {
-                return _DownloadCard(
-                  download: _downloads[index],
-                  onDelete: () => _deleteDownload(index),
-                  onRetry: () => _retryDownload(index),
-                );
-              },
-            ),
+      body: Consumer<DownloadManager>(
+        builder: (context, downloadManager, child) {
+          final downloads = downloadManager.downloads;
+
+          if (downloads.isEmpty) {
+            return _buildEmptyState(context);
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: downloads.length,
+            itemBuilder: (context, index) {
+              final download = downloads[index];
+              return _DownloadCard(
+                download: download,
+                onDelete: () => downloadManager.removeDownload(download.id),
+                onRetry: () => downloadManager.retryDownload(download.id),
+                onCancel: () => downloadManager.cancelDownload(download.id),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(BuildContext context) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -95,45 +85,19 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       ),
     );
   }
-
-  void _clearCompleted() {
-    setState(() {
-      _downloads.removeWhere(
-        (download) => download.status == DownloadStatus.completed,
-      );
-    });
-  }
-
-  void _deleteDownload(int index) {
-    setState(() {
-      _downloads.removeAt(index);
-    });
-  }
-
-  void _retryDownload(int index) {
-    setState(() {
-      _downloads[index] = _downloads[index].copyWith(
-        status: DownloadStatus.downloading,
-        progress: 0,
-      );
-    });
-
-    // Aquí implementarías la lógica de reintento
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Reintentando descarga...')));
-  }
 }
 
 class _DownloadCard extends StatelessWidget {
   final DownloadItem download;
   final VoidCallback onDelete;
   final VoidCallback onRetry;
+  final VoidCallback onCancel;
 
   const _DownloadCard({
     required this.download,
     required this.onDelete,
     required this.onRetry,
+    required this.onCancel,
   });
 
   @override
@@ -163,7 +127,7 @@ class _DownloadCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${download.format} • ${download.size}',
+                        '${download.format.toUpperCase()} • ${download.quality} • ${_getStatusText()}',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Colors.grey[600],
                         ),
@@ -193,6 +157,85 @@ class _DownloadCard extends StatelessWidget {
               ),
             ],
 
+            if (download.status == DownloadStatus.failed &&
+                download.errorMessage != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 16,
+                      color: Colors.red.shade700,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        download.errorMessage!,
+                        style: TextStyle(
+                          color: Colors.red.shade700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            if (download.status == DownloadStatus.completed &&
+                download.filePath != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.check_circle_outline,
+                      size: 16,
+                      color: Colors.green.shade700,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Guardado en: ${download.filePath!.split('/').last}',
+                        style: TextStyle(
+                          color: Colors.green.shade700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    if (Platform.isAndroid) ...[
+                      const SizedBox(width: 8),
+                      InkWell(
+                        onTap: () => _openFile(download.filePath!),
+                        child: Text(
+                          'Abrir',
+                          style: TextStyle(
+                            color: Colors.green.shade700,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+
             const SizedBox(height: 8),
             Text(
               download.url,
@@ -208,6 +251,21 @@ class _DownloadCard extends StatelessWidget {
     );
   }
 
+  String _getStatusText() {
+    switch (download.status) {
+      case DownloadStatus.pending:
+        return 'Pendiente';
+      case DownloadStatus.downloading:
+        return 'Descargando';
+      case DownloadStatus.completed:
+        return 'Completado';
+      case DownloadStatus.failed:
+        return 'Error';
+      case DownloadStatus.cancelled:
+        return 'Cancelado';
+    }
+  }
+
   Widget _buildStatusIcon() {
     switch (download.status) {
       case DownloadStatus.completed:
@@ -220,6 +278,10 @@ class _DownloadCard extends StatelessWidget {
         );
       case DownloadStatus.failed:
         return const Icon(Icons.error, color: Colors.red, size: 24);
+      case DownloadStatus.cancelled:
+        return const Icon(Icons.cancel, color: Colors.orange, size: 24);
+      case DownloadStatus.pending:
+        return const Icon(Icons.schedule, color: Colors.blue, size: 24);
     }
   }
 
@@ -230,9 +292,22 @@ class _DownloadCard extends StatelessWidget {
           onSelected: (value) {
             if (value == 'delete') {
               onDelete();
+            } else if (value == 'open' && download.filePath != null) {
+              _openFile(download.filePath!);
             }
           },
           itemBuilder: (context) => [
+            if (download.filePath != null && Platform.isAndroid)
+              const PopupMenuItem(
+                value: 'open',
+                child: Row(
+                  children: [
+                    Icon(Icons.open_in_new, size: 20),
+                    SizedBox(width: 8),
+                    Text('Abrir'),
+                  ],
+                ),
+              ),
             const PopupMenuItem(
               value: 'delete',
               child: Row(
@@ -249,10 +324,11 @@ class _DownloadCard extends StatelessWidget {
       case DownloadStatus.downloading:
         return IconButton(
           icon: const Icon(Icons.cancel),
-          onPressed: onDelete,
+          onPressed: onCancel,
           tooltip: 'Cancelar',
         );
       case DownloadStatus.failed:
+      case DownloadStatus.cancelled:
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -268,44 +344,18 @@ class _DownloadCard extends StatelessWidget {
             ),
           ],
         );
+      case DownloadStatus.pending:
+        return IconButton(
+          icon: const Icon(Icons.delete),
+          onPressed: onDelete,
+          tooltip: 'Eliminar',
+        );
     }
   }
-}
 
-enum DownloadStatus { downloading, completed, failed }
-
-class DownloadItem {
-  final String title;
-  final String url;
-  final String format;
-  final DownloadStatus status;
-  final int progress;
-  final String size;
-
-  DownloadItem({
-    required this.title,
-    required this.url,
-    required this.format,
-    required this.status,
-    required this.progress,
-    required this.size,
-  });
-
-  DownloadItem copyWith({
-    String? title,
-    String? url,
-    String? format,
-    DownloadStatus? status,
-    int? progress,
-    String? size,
-  }) {
-    return DownloadItem(
-      title: title ?? this.title,
-      url: url ?? this.url,
-      format: format ?? this.format,
-      status: status ?? this.status,
-      progress: progress ?? this.progress,
-      size: size ?? this.size,
-    );
+  void _openFile(String filePath) {
+    // En una implementación real, usarías open_file o similar
+    // Por ahora solo mostramos la ruta
+    debugPrint('Abrir archivo: $filePath');
   }
 }

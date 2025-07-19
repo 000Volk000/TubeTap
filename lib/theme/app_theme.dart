@@ -13,13 +13,11 @@ class AppTheme {
         secondary: AppColors.accent,
         secondaryContainer: AppColors.coralRed200,
         surface: AppColors.surface,
-        background: AppColors.background,
         error: AppColors.error,
         onPrimary: AppColors.textOnPrimary,
         onPrimaryContainer: AppColors.textPrimary,
         onSecondary: AppColors.textOnPrimary,
         onSurface: AppColors.textPrimary,
-        onBackground: AppColors.textPrimary,
         onError: AppColors.textOnPrimary,
       ),
 
@@ -117,14 +115,12 @@ class AppTheme {
         secondary: AppColors.accent,
         secondaryContainer: AppColors.coralRed800,
         surface: Colors.white, // Superficie blanca
-        background: Colors.white, // Fondo blanco
         error: AppColors.coralRed400,
         onPrimary: AppColors.textOnPrimary,
         onPrimaryContainer: AppColors.coralRed100,
         onSecondary: AppColors.textOnPrimary,
         onSurface:
             AppColors.textPrimary, // Texto oscuro sobre superficie blanca
-        onBackground: AppColors.textPrimary, // Texto oscuro sobre fondo blanco
         onError: Colors.white,
       ),
 
