@@ -168,12 +168,13 @@ def perform_download(youtube_url, quality_option):
                 final_file_path = base_name + ".mp3"
             else:
                 # yt-dlp adds .mp4 extension to the final merged file
-                final_file_path = temp_file_path
-
-            # In case of video, yt-dlp might merge and create a new file without the .tmp
-            if not is_audio_download and not os.path.exists(final_file_path):
-                 final_file_path = final_file_path.replace(".tmp", "")
-
+                # The final file will be named based on the temp file path + .mp4
+                final_file_path = temp_file_path + ".mp4"
+                # If the merged file doesn't exist, it might be because no merge was needed.
+                # In that case, yt-dlp would have just renamed the .tmp to .mp4
+                if not os.path.exists(final_file_path):
+                    base_name, _ = os.path.splitext(temp_file_path)
+                    final_file_path = base_name + ".mp4"
 
             if os.path.exists(final_file_path):
                 announcer.announce(format_sse(json.dumps({"status": "download_complete", "file_path": os.path.basename(final_file_path), "message": "Download complete. Ready for streaming."}), event="progress"))
@@ -229,7 +230,7 @@ def serve_video(filename):
     full_path = os.path.join(base_temp_dir, filename)
 
     # Check if the file exists and has the expected prefix
-    if not os.path.exists(full_path) or not os.path.isfile(full_path) or not filename.startswith("yt-dlp_download_"):
+    if not os.path.exists(full_path) or not os.path.isfile(full_path) or not (filename.endswith(".mp4") or filename.endswith(".mp3")):
         return jsonify({"error": "File not found or unauthorized access"}), 404
 
     # Read the file into memory and delete it immediately
@@ -269,3 +270,4 @@ def serve_video(filename):
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
