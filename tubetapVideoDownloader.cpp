@@ -38,28 +38,85 @@ int downloadMedia(const string &url, const string &format,
 
   char buffer[256];
   string filename;
-  regex title_regex(R"(Destination:\s+(.*\.(mp3|mp4)))");
+  string full_path;
+  regex title_regex(R"(\[download\]\s+Destination:\s+(.*))");
+  regex download_regex(R"(\[download\]\s+(.+)\s+has already been downloaded)");
+  regex merge_regex(R"(\[Merger\]\s+Merging formats into\s+\"(.+)\")");
 
   while (fgets(buffer, sizeof(buffer), pipe) != nullptr)
   {
     string line(buffer);
     smatch match;
 
+    // Try different regex patterns to catch the file path
     if (regex_search(line, match, title_regex))
     {
-      filename = fs::path(match[1].str()).filename().string();
+      full_path = match[1].str();
+      // Remove quotes if present
+      if (full_path.front() == '"' && full_path.back() == '"')
+      {
+        full_path = full_path.substr(1, full_path.length() - 2);
+      }
+      filename = fs::path(full_path).filename().string();
+    }
+    else if (regex_search(line, match, download_regex))
+    {
+      full_path = match[1].str();
+      if (full_path.front() == '"' && full_path.back() == '"')
+      {
+        full_path = full_path.substr(1, full_path.length() - 2);
+      }
+      filename = fs::path(full_path).filename().string();
+    }
+    else if (regex_search(line, match, merge_regex))
+    {
+      full_path = match[1].str();
+      filename = fs::path(full_path).filename().string();
     }
   }
 
   int status = pclose(pipe);
   if (status == 0)
   {
-    cout << "\n\033[32mDescarga completada con éxito\033[0m\n\n";
+    // If we couldn't parse the path from output, search for the most recent file
+    if (full_path.empty())
+    {
+      string search_dir = DOWNLOAD_BASE + "Videos/";
+      try
+      {
+        auto current_time = fs::file_time_type::clock::now();
+        fs::file_time_type newest_time = fs::file_time_type::min();
+
+        for (const auto &entry : fs::directory_iterator(search_dir))
+        {
+          if (entry.is_regular_file())
+          {
+            string ext = entry.path().extension().string();
+            if (ext == ".mp4" || ext == ".mkv" || ext == ".webm")
+            {
+              auto file_time = fs::last_write_time(entry);
+              if (file_time > newest_time)
+              {
+                newest_time = file_time;
+                full_path = entry.path().string();
+              }
+            }
+          }
+        }
+      }
+      catch (const exception &e)
+      {
+        cerr << "Error searching for files: " << e.what() << endl;
+      }
+    }
+
+    // Output the full path to stdout for the Python script to capture
+    cout << "DOWNLOADED_FILE:" << full_path << endl;
     return (EXIT_SUCCESS);
   }
   else
   {
-    cout << "\n\033[31mError en la descarga\033[0m\n\n";
+    cerr << "Error en la descarga" << endl;
     return (EXIT_FAILURE);
   }
 }

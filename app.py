@@ -72,195 +72,283 @@ def download_video():
 
 def perform_download(youtube_url, quality_option):
     # This function will run in a separate thread
+    progress_stop_event = threading.Event()  # Event to stop fake progress
+    
     try:
-        # Generate a unique filename for the temporary video file
-        temp_file_prefix = f"yt-dlp_download_{int(time.time())}_"
-        temp_file = tempfile.NamedTemporaryFile(delete=False, prefix=temp_file_prefix, suffix=".tmp")
-        temp_file_path = temp_file.name
-        temp_file.close() # Close the file handle immediately, yt-dlp will open it
-
-        # Construct yt-dlp command
-        yt_dlp_cmd = [
-            "yt-dlp",
-            "--output", temp_file_path,
-            "--progress",
-            "--progress-template", "%(progress.downloaded_bytes)s/%(progress.total_bytes)s %(progress._percent_str)s %(progress._eta_str)s",
-        ]
-
-        # Determine yt-dlp format selection based on quality_option
+        # Determine if it's audio or video download and prepare command
         is_audio_download = False
+        cmd = []
+        
         if quality_option:
             if 'p' in quality_option: # Video quality (e.g., "720p")
                 height = quality_option.replace('p', '')
-                format_selector = f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={height}]+bestaudio/best[height<={height}]"
-                yt_dlp_cmd.extend(["--format", format_selector, "--merge-output-format", "mp4"])
+                cmd = ["/opt/my_youtube_downloader/tubetapVideoDownloader", youtube_url, height]
             elif 'K' in quality_option: # Audio bitrate (e.g., "128K")
                 is_audio_download = True
                 bitrate = quality_option.replace('K', '')
-                format_selector = f"bestaudio[abr<={bitrate}]/bestaudio"
-                # For audio, let yt-dlp determine the final extension.
-                # We remove the explicit --output with .tmp and let it generate the .mp3
-                # We will need to find the file later.
-                # A better approach is to specify the output without extension
-                base_output_path, _ = os.path.splitext(temp_file_path)
-                yt_dlp_cmd = [
-                    "yt-dlp",
-                    "--output", base_output_path + ".%(ext)s",
-                    "--progress",
-                    "--progress-template", "%(progress.downloaded_bytes)s/%(progress.total_bytes)s %(progress._percent_str)s %(progress._eta_str)s",
-                ]
-                yt_dlp_cmd.extend(["--format", format_selector, "--extract-audio", "--audio-format", "mp3"])
+                cmd = ["/opt/my_youtube_downloader/tubetapAudioDownloader", youtube_url, bitrate]
             else:
-                # Default to best quality if format is unrecognized
-                format_selector = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"
-                yt_dlp_cmd.extend(["--format", format_selector, "--merge-output-format", "mp4"])
+                # Default to video 720p if format is unrecognized
+                cmd = ["/opt/my_youtube_downloader/tubetapVideoDownloader", youtube_url, "720"]
         else:
-            # Default format if no quality option is provided
-            format_selector = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"
-            yt_dlp_cmd.extend(["--format", format_selector, "--merge-output-format", "mp4"])
+            # Default to video 720p if no quality option is provided
+            cmd = ["/opt/my_youtube_downloader/tubetapVideoDownloader", youtube_url, "720"]
 
-        yt_dlp_cmd.append(youtube_url)
+        print(f"Executing command: {' '.join(cmd)}")
 
         # Announce start of download
         announcer.announce(format_sse(json.dumps({"status": "downloading", "progress": 0, "message": "Starting download..."}), event="progress"))
 
+        # Start the fake progress update in a separate thread
+        fake_progress_thread = threading.Thread(target=update_fake_progress, args=(progress_stop_event,))
+        fake_progress_thread.daemon = True
+        fake_progress_thread.start()
+
+        # Execute the C++ program
         process = subprocess.Popen(
-            yt_dlp_cmd,
+            cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, # Merge stderr into stdout for simpler parsing
-            bufsize=1, # Line-buffered output
-            text=True # Decode output as text
+            stderr=subprocess.PIPE,
+            text=True
         )
 
-        total_bytes = None
-        downloaded_bytes = 0
-
-        for line in process.stdout:
-            # Parse progress line from yt-dlp output
-            match = re.search(r'(\d+)/(\d+)\s+([\d.]+%)', line)
-            if match:
-                downloaded_bytes = int(match.group(1))
-                total_bytes = int(match.group(2))
-                percent_str = match.group(3)
-                
-                progress_percent = 0
-                if total_bytes > 0:
-                    progress_percent = int((downloaded_bytes / total_bytes) * 100)
-
-                announcer.announce(format_sse(json.dumps({
-                    "status": "downloading",
-                    "progress": progress_percent,
-                    "downloaded": downloaded_bytes,
-                    "total": total_bytes,
-                    "message": f"Downloading: {percent_str}"
-                }), event="progress"))
-            else:
-                # Log other output lines for debugging
-                print(f"YT-DLP Output: {line.strip()}")
-
-        process.wait() # Wait for the process to complete
+        stdout, stderr = process.communicate()
+        
+        # Stop the fake progress immediately
+        progress_stop_event.set()
+        
+        print(f"Return code: {process.returncode}")
+        print(f"STDOUT: {stdout}")
+        print(f"STDERR: {stderr}")
         
         if process.returncode == 0:
-            final_file_path = ""
-            if is_audio_download:
-                # yt-dlp replaces the original extension with .mp3
-                base_name, _ = os.path.splitext(temp_file_path)
-                final_file_path = base_name + ".mp3"
+            # Parse the output to get the downloaded file path
+            downloaded_file_path = None
+            for line in stdout.split('\n'):
+                line = line.strip()
+                if line.startswith('DOWNLOADED_FILE:'):
+                    downloaded_file_path = line.replace('DOWNLOADED_FILE:', '').strip()
+                    print(f"Found downloaded file path: {downloaded_file_path}")
+                    break
+            
+            # If we didn't find the DOWNLOADED_FILE line, try to find the file manually
+            if not downloaded_file_path:
+                print("DOWNLOADED_FILE line not found, searching for files...")
+                # Search in the appropriate directory
+                search_dir = "/tmp/Videos/" if not is_audio_download else "/tmp/Audios/"
+                try:
+                    if os.path.exists(search_dir):
+                        files = os.listdir(search_dir)
+                        if files:
+                            # Get the most recent file
+                            files_with_time = []
+                            for f in files:
+                                if f.endswith(('.mp4', '.mp3')):
+                                    file_path = os.path.join(search_dir, f)
+                                    if os.path.isfile(file_path):
+                                        files_with_time.append((f, os.path.getmtime(file_path)))
+                            
+                            if files_with_time:
+                                files_with_time.sort(key=lambda x: x[1], reverse=True)  # Sort by modification time, newest first
+                                downloaded_file_path = os.path.join(search_dir, files_with_time[0][0])
+                                print(f"Found most recent file: {downloaded_file_path}")
+                except Exception as e:
+                    print(f"Error searching for files: {e}")
+            
+            # Verify the file exists (handle potential encoding issues)
+            if downloaded_file_path:
+                if not os.path.exists(downloaded_file_path):
+                    print(f"File not found at exact path: {downloaded_file_path}")
+                    # Try to find similar files in case of encoding differences
+                    try:
+                        search_dir = os.path.dirname(downloaded_file_path)
+                        expected_basename = os.path.basename(downloaded_file_path)
+                        
+                        if os.path.exists(search_dir):
+                            for file in os.listdir(search_dir):
+                                if file.endswith(('.mp4', '.mp3')):
+                                    # Check if it's a recent file (within last minute)
+                                    file_path = os.path.join(search_dir, file)
+                                    if os.path.getmtime(file_path) > time.time() - 60:
+                                        downloaded_file_path = file_path
+                                        print(f"Found recent file instead: {downloaded_file_path}")
+                                        break
+                    except Exception as e:
+                        print(f"Error finding alternative file: {e}")
+            
+            if downloaded_file_path and os.path.exists(downloaded_file_path):
+                # Set progress to 100% and announce completion
+                announcer.announce(format_sse(json.dumps({
+                    "status": "downloading", 
+                    "progress": 100, 
+                    "message": "Download complete!"
+                }), event="progress"))
+                
+                time.sleep(0.5)  # Small delay to ensure 100% is shown
+                
+                # URL encode the filename for safe HTTP transmission
+                import urllib.parse
+                safe_filename = urllib.parse.quote(os.path.basename(downloaded_file_path), safe='')
+                
+                announcer.announce(format_sse(json.dumps({
+                    "status": "download_complete", 
+                    "file_path": safe_filename,  # Send URL-encoded filename
+                    "original_filename": os.path.basename(downloaded_file_path),  # Original for display
+                    "full_path": downloaded_file_path,
+                    "message": "Download complete. Ready for streaming."
+                }), event="progress"))
             else:
-                # yt-dlp adds .mp4 extension to the final merged file
-                # The final file will be named based on the temp file path + .mp4
-                final_file_path = temp_file_path + ".mp4"
-                # If the merged file doesn't exist, it might be because no merge was needed.
-                # In that case, yt-dlp would have just renamed the .tmp to .mp4
-                if not os.path.exists(final_file_path):
-                    base_name, _ = os.path.splitext(temp_file_path)
-                    final_file_path = base_name + ".mp4"
-
-            if os.path.exists(final_file_path):
-                announcer.announce(format_sse(json.dumps({"status": "download_complete", "file_path": os.path.basename(final_file_path), "message": "Download complete. Ready for streaming."}), event="progress"))
-            else:
-                # Fallback to original path if expected final file doesn't exist
-                # This might happen if the download was a single file that didn't need merging/conversion
-                if os.path.exists(temp_file_path):
-                     announcer.announce(format_sse(json.dumps({"status": "download_complete", "file_path": os.path.basename(temp_file_path), "message": "Download complete. Ready for streaming."}), event="progress"))
-                else:
-                    announcer.announce(format_sse(json.dumps({"status": "error", "message": f"Downloaded file not found at expected path: {final_file_path}"}), event="progress"))
+                error_msg = f"Downloaded file not found. Expected path: {downloaded_file_path if downloaded_file_path else 'unknown'}"
+                print(error_msg)
+                announcer.announce(format_sse(json.dumps({
+                    "status": "error", 
+                    "message": error_msg
+                }), event="progress"))
         else:
-            # Capture stderr for more detailed error messages
-            error_output = ""
-            for line in process.stdout:
-                error_output += line
-            announcer.announce(format_sse(json.dumps({"status": "error", "message": f"yt-dlp failed with code {process.returncode}: {error_output.strip()}"}), event="progress"))
-            if os.path.exists(temp_file_path):
-                os.unlink(temp_file_path) # Clean up partial file
-            # Also check for .mp4 or .mp3 version
-            mp4_path = temp_file_path + ".mp4"
-            if os.path.exists(mp4_path):
-                os.unlink(mp4_path)
-            base_name, _ = os.path.splitext(temp_file_path)
-            mp3_path = base_name + ".mp3"
-            if os.path.exists(mp3_path):
-                os.unlink(mp3_path)
-            return
-
-        # --- Stream the file back to the client ---
-        # This part assumes the Flutter app will make a separate GET request to fetch the file
-        # The path is sent via SSE, and the Flutter app then requests it.
-        # This is a simplified approach. For direct streaming, the /download endpoint
-        # would need to handle the streaming directly after download.
+            error_msg = f"Download failed (exit code {process.returncode})"
+            if stderr.strip():
+                if "403" in stderr or "Forbidden" in stderr:
+                    error_msg = "Download failed: YouTube access forbidden (rate limited). Please try again later."
+                else:
+                    error_msg += f": {stderr.strip()}"
+            
+            print(f"Download failed: {error_msg}")
+            announcer.announce(format_sse(json.dumps({
+                "status": "error", 
+                "message": error_msg
+            }), event="progress"))
 
     except Exception as e:
-        announcer.announce(format_sse(json.dumps({"status": "error", "message": f"Server error during download: {str(e)}"}), event="progress"))
-        if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-            os.unlink(temp_file_path) # Clean up partial file
-        # Also check for .mp4 version
-        if 'temp_file_path' in locals():
-            mp4_path = temp_file_path + ".mp4"
-            if os.path.exists(mp4_path):
-                os.unlink(mp4_path)
+        # Stop the fake progress in case of exception
+        if 'progress_stop_event' in locals():
+            progress_stop_event.set()
+            
+        error_msg = f"Server error during download: {str(e)}"
+        print(error_msg)
+        announcer.announce(format_sse(json.dumps({
+            "status": "error", 
+            "message": error_msg
+        }), event="progress"))
+
+def update_fake_progress(stop_event):
+    """Update fake progress from 0 to 95% over about 4.5 minutes"""
+    progress = 0
+    while progress < 95 and not stop_event.is_set():
+        time.sleep(1.5)  # Update every 3 seconds
+        if stop_event.is_set():  # Check again after sleep
+            break
+        progress += 1  # Increment by 1% each time
+        announcer.announce(format_sse(json.dumps({
+            "status": "downloading",
+            "progress": progress,
+            "message": f"Downloading: {progress}%"
+        }), event="progress"))
 
 # --- Endpoint to serve the downloaded file ---
 @app.route('/serve_video/<path:filename>')
 def serve_video(filename):
-    # Security: Ensure filename is within expected temporary directory
-    # This is a critical security measure to prevent directory traversal attacks.
+    # URL decode the filename to handle special characters
+    import urllib.parse
+    decoded_filename = urllib.parse.unquote(filename)
     
-    # For demonstration, assume files are in a specific temp directory
-    base_temp_dir = tempfile.gettempdir() # Get system's temporary directory
-    full_path = os.path.join(base_temp_dir, filename)
-
-    # Check if the file exists and has the expected prefix
-    if not os.path.exists(full_path) or not os.path.isfile(full_path) or not (filename.endswith(".mp4") or filename.endswith(".mp3")):
+    print(f"Original filename: {filename}")
+    print(f"Decoded filename: {decoded_filename}")
+    
+    # Security: Ensure filename is within expected directories
+    # Check in both /tmp/Videos/ and /tmp/Audios/ directories
+    
+    possible_paths = [
+        os.path.join("/tmp/Videos", decoded_filename),
+        os.path.join("/tmp/Audios", decoded_filename)
+    ]
+    
+    full_path = None
+    for path in possible_paths:
+        print(f"Checking exact path: {path}")
+        if os.path.exists(path) and os.path.isfile(path):
+            # Additional security check: ensure the path is actually within the expected directories
+            real_path = os.path.realpath(path)
+            if (real_path.startswith("/tmp/Videos/") or real_path.startswith("/tmp/Audios/")) and \
+               (decoded_filename.endswith(".mp4") or decoded_filename.endswith(".mp3") or decoded_filename.endswith(".m4a")):
+                full_path = path
+                print(f"Found exact file at: {full_path}")
+                break
+    
+    # If exact path not found, try to find a similar file (handle encoding issues)
+    if not full_path:
+        print("Exact file not found, searching for similar files...")
+        for search_dir in ["/tmp/Videos", "/tmp/Audios"]:
+            if os.path.exists(search_dir):
+                try:
+                    files = os.listdir(search_dir)
+                    print(f"Files in {search_dir}: {files}")
+                    
+                    # Look for files that match the base name (without path)
+                    target_basename = os.path.basename(decoded_filename)
+                    
+                    for file in files:
+                        if file.endswith(('.mp4', '.mp3', '.m4a')):
+                            file_path = os.path.join(search_dir, file)
+                            
+                            # Check if filenames are similar or if it's a recent file
+                            is_similar = (file == target_basename or 
+                                        file.replace(' ', '_') == target_basename.replace(' ', '_') or
+                                        file.replace('｜', '|') == target_basename.replace('｜', '|'))
+                            is_recent = os.path.getmtime(file_path) > time.time() - 300  # Within last 5 minutes
+                            
+                            if is_similar or is_recent:
+                                real_path = os.path.realpath(file_path)
+                                if real_path.startswith(f"{search_dir}/"):
+                                    full_path = file_path
+                                    print(f"Found similar/recent file: {full_path}")
+                                    break
+                    
+                    if full_path:
+                        break
+                except Exception as e:
+                    print(f"Error searching in {search_dir}: {e}")
+    
+    if not full_path:
+        print(f"File not found anywhere: {decoded_filename}")
         return jsonify({"error": "File not found or unauthorized access"}), 404
 
     # Read the file into memory and delete it immediately
     try:
+        print(f"Reading file: {full_path}")
         with open(full_path, 'rb') as f:
             file_data = f.read()
+        
+        print(f"File size: {len(file_data)} bytes")
         
         # Delete the file after reading it
         os.unlink(full_path)
         print(f"Deleted temporary file: {full_path}")
         
-        # Create a BytesIO object to serve the file
-        file_io = io.BytesIO(file_data)
-        
         # Determine content type based on file extension
-        if filename.endswith('.mp4'):
+        if decoded_filename.endswith('.mp4'):
             mimetype = 'video/mp4'
-        elif filename.endswith('.mp3'):
+        elif decoded_filename.endswith('.mp3'):
             mimetype = 'audio/mpeg'
-        elif filename.endswith('.m4a'):
+        elif decoded_filename.endswith('.m4a'):
             mimetype = 'audio/mp4'
         else:
             mimetype = 'application/octet-stream'
         
+        # Create safe filename for download (encode if necessary)
+        safe_filename = os.path.basename(decoded_filename)
+        # Replace problematic characters for Content-Disposition header
+        safe_filename = safe_filename.replace('"', '\\"')
+        
+        print(f"Serving file with mimetype: {mimetype}")
+        
         return Response(
-            file_io.getvalue(),
+            file_data,
             mimetype=mimetype,
             headers={
-                'Content-Disposition': f'attachment; filename="{os.path.basename(filename)}"',
-                'Content-Length': str(len(file_data))
+                'Content-Disposition': f'attachment; filename*=UTF-8\'\'{urllib.parse.quote(safe_filename)}',
+                'Content-Length': str(len(file_data)),
+                'Cache-Control': 'no-cache',
+                'Connection': 'close'
             }
         )
         
